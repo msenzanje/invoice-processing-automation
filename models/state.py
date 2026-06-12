@@ -1,5 +1,7 @@
 from typing import TypedDict, Optional, Dict, Any, List
 
+from models.invoice_data import InvoiceData
+
 
 class InvoiceState(TypedDict):
     """
@@ -25,6 +27,12 @@ class InvoiceState(TypedDict):
     # - total_amount: float
     # - items: List[Dict[str, Any]]
     # - description: str (optional)
+
+    # Structured extraction result (Phase 2 — Ingestion Agent).
+    # Rich, typed, per-field-confidence object produced by agents.ingestion.extract().
+    # parsed_data above is kept populated (from invoice_data.model_dump_log()) for
+    # back-compat; downstream agents should prefer invoice_data.
+    invoice_data: Optional[InvoiceData]
     
     # Processing state
     processing_stage: str  # "pending", "extracted", "validated", "stored"
