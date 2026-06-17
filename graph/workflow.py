@@ -14,6 +14,7 @@ import logging
 from langgraph.graph import END, StateGraph
 
 from agents.ingestion import extract
+from agents.validation import validate_invoice
 from models.invoice_data import Confidence
 from models.state import InvoiceState
 
@@ -61,9 +62,17 @@ def ingest_invoice(state: InvoiceState) -> InvoiceState:
 
 
 def build_graph():
-    """Compile the (currently single-node) ingestion workflow."""
+    """Compile the ingestion → validation workflow.
+
+    Validation always runs after ingestion. When ingestion fails it leaves
+    ``invoice_data`` as None; the validation node detects that and no-ops
+    (fail-forward), so a failed extraction still flows cleanly to END. Approval
+    and payment nodes are added in later phases.
+    """
     graph = StateGraph(InvoiceState)
     graph.add_node("ingest_invoice", ingest_invoice)
+    graph.add_node("validate_invoice", validate_invoice)
     graph.set_entry_point("ingest_invoice")
-    graph.add_edge("ingest_invoice", END)
+    graph.add_edge("ingest_invoice", "validate_invoice")
+    graph.add_edge("validate_invoice", END)
     return graph.compile()

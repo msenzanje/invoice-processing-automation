@@ -1,6 +1,7 @@
 from typing import TypedDict, Optional, Dict, Any, List
 
 from models.invoice_data import InvoiceData
+from models.results import ValidationResult
 
 
 class InvoiceState(TypedDict):
@@ -36,8 +37,13 @@ class InvoiceState(TypedDict):
     
     # Processing state
     processing_stage: str  # "pending", "extracted", "validated", "stored"
-    is_valid: Optional[bool]  
+    is_valid: Optional[bool]
     validation_errors: List[str]
+
+    # Structured validation result (Phase 3 — Validation Agent).
+    # Typed flags produced by agents.validation.validate_invoice(). The approval
+    # agent routes on these (specifically flag severity). None until validation runs.
+    validation_result: Optional[ValidationResult]
     
     # Database/Inventory state
     inventory_updated: bool 

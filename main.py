@@ -40,6 +40,7 @@ def build_initial_state(invoice_path: str) -> InvoiceState:
         "processing_stage": "pending",
         "is_valid": None,
         "validation_errors": [],
+        "validation_result": None,
         "inventory_updated": False,
         "db_record_id": None,
         "extraction_confidence": 0.0,
@@ -75,6 +76,22 @@ def _render_result(state: InvoiceState) -> None:
     console.print(table)
     for item in data.items:
         console.print(f"  • {item.item}  qty={item.quantity}  @ ${item.unit_price:,.2f}")
+    _render_validation(state)
+
+
+def _render_validation(state: InvoiceState) -> None:
+    result = state.get("validation_result")
+    if result is None:
+        return
+    if result.passes:
+        console.print("[bold green]Validation: passed[/] (no flags)")
+        return
+    style = "red" if result.has_errors else "yellow"
+    console.print(f"[bold {style}]Validation: {len(result.all_flags())} flag(s)[/]")
+    for flag in result.all_flags():
+        marker = "[red]✗[/]" if flag.severity == "error" else "[yellow]![/]"
+        scope = f" ({flag.item})" if flag.item else ""
+        console.print(f"  {marker} {flag.code.value}{scope}: {flag.message}")
 
 
 def main() -> None:
