@@ -30,7 +30,11 @@ from typing import Any, Optional
 from pydantic import ValidationError
 
 from models.invoice_data import CONFIDENCE_FIELDS, Confidence, InvoiceData, LineItem
-from tools.llm import LLMProtocol, get_llm_client
+from tools.llm import LLMProtocol, get_llm_client, strip_json
+
+# Backwards-compatible alias: the JSON stripper now lives in tools.llm (shared by
+# the approval agent). Existing call sites in this module use the short name.
+_strip_json = strip_json
 
 logger = logging.getLogger(__name__)
 
@@ -490,17 +494,6 @@ def _build_correction_prompt(raw_text: str, previous: str, error: str) -> str:
         f"It failed validation with this error:\n{error}\n\n"
         "Return a corrected JSON object that resolves this error. Output ONLY the JSON."
     )
-
-
-def _strip_json(text: str) -> str:
-    """Pull the outermost JSON object out of a possibly fenced/prose-wrapped reply."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I).strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        return text[start:end + 1]
-    return text
 
 
 def _extract_with_llm(raw_text: str, fields: Fields, llm: LLMProtocol) -> InvoiceData:

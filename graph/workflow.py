@@ -13,9 +13,12 @@ import logging
 
 from langgraph.graph import END, StateGraph
 
+from agents.approval import approve_invoice
 from agents.ingestion import extract
+from agents.payment import escalation_node, log_node, payment_node
 from agents.validation import validate_invoice
 from models.invoice_data import Confidence
+from models.results import ApprovalDecision
 from models.state import InvoiceState
 
 logger = logging.getLogger(__name__)
@@ -61,18 +64,57 @@ def ingest_invoice(state: InvoiceState) -> InvoiceState:
     }
 
 
-def build_graph():
-    """Compile the ingestion → validation workflow.
+# Routing target for each terminal branch off the approval decision.
+_DECISION_ROUTE = {
+    ApprovalDecision.APPROVED: "process_payment",
+    ApprovalDecision.REJECTED: "log_rejection",
+    ApprovalDecision.NEEDS_REVIEW: "escalate_review",
+}
 
-    Validation always runs after ingestion. When ingestion fails it leaves
-    ``invoice_data`` as None; the validation node detects that and no-ops
-    (fail-forward), so a failed extraction still flows cleanly to END. Approval
-    and payment nodes are added in later phases.
+
+def route_after_approval(state: InvoiceState) -> str:
+    """Conditional edge: pick the terminal node from ``approval_result.decision``.
+
+    A missing ``approval_result`` means the invoice died upstream (failed ingestion,
+    so approval no-opped). Rather than drop it, route to the rejection log so a dead
+    invoice still terminates cleanly with an audit record (fail-forward).
+    """
+    result = state.get("approval_result")
+    if result is None:
+        logger.info("routing %s: no approval_result -> log_rejection", state.get("invoice_id"))
+        return "log_rejection"
+    return _DECISION_ROUTE[result.decision]
+
+
+def build_graph():
+    """Compile the full ingestion -> validation -> approval -> terminal workflow.
+
+    The pipeline is linear through approval, then fans out on the approval decision:
+    approved -> payment, rejected -> rejection log, needs_review -> human escalation.
+    Every node is fail-forward (state in, state out, never raises), so a failed
+    extraction or an unreachable LLM still flows to a clean terminal node and END.
     """
     graph = StateGraph(InvoiceState)
     graph.add_node("ingest_invoice", ingest_invoice)
     graph.add_node("validate_invoice", validate_invoice)
+    graph.add_node("approve_invoice", approve_invoice)
+    graph.add_node("process_payment", payment_node)
+    graph.add_node("log_rejection", log_node)
+    graph.add_node("escalate_review", escalation_node)
+
     graph.set_entry_point("ingest_invoice")
     graph.add_edge("ingest_invoice", "validate_invoice")
-    graph.add_edge("validate_invoice", END)
+    graph.add_edge("validate_invoice", "approve_invoice")
+    graph.add_conditional_edges(
+        "approve_invoice",
+        route_after_approval,
+        {
+            "process_payment": "process_payment",
+            "log_rejection": "log_rejection",
+            "escalate_review": "escalate_review",
+        },
+    )
+    graph.add_edge("process_payment", END)
+    graph.add_edge("log_rejection", END)
+    graph.add_edge("escalate_review", END)
     return graph.compile()

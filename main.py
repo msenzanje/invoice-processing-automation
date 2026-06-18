@@ -1,9 +1,10 @@
 """
 CLI entrypoint
 
-Phase 2 scope: ingest a single invoice file and display the extracted, typed
-result. Later phases extend the workflow (validation, approval, payment); this CLI
-just builds the LangGraph app and invokes it.
+Builds the full LangGraph app — ingestion -> validation -> approval -> one of three
+terminal nodes (payment / rejection log / human escalation) — invokes it on a single
+invoice file, and renders the extracted fields, validation flags, and the approval
+decision (with the reflection transcript when the critique loop ran).
 
 Usage:
     python main.py --invoice_path=data/invoices/invoice_1001.txt
@@ -41,6 +42,7 @@ def build_initial_state(invoice_path: str) -> InvoiceState:
         "is_valid": None,
         "validation_errors": [],
         "validation_result": None,
+        "approval_result": None,
         "inventory_updated": False,
         "db_record_id": None,
         "extraction_confidence": 0.0,
@@ -77,6 +79,7 @@ def _render_result(state: InvoiceState) -> None:
     for item in data.items:
         console.print(f"  • {item.item}  qty={item.quantity}  @ ${item.unit_price:,.2f}")
     _render_validation(state)
+    _render_approval(state)
 
 
 def _render_validation(state: InvoiceState) -> None:
@@ -94,8 +97,41 @@ def _render_validation(state: InvoiceState) -> None:
         console.print(f"  {marker} {flag.code.value}{scope}: {flag.message}")
 
 
+_DECISION_STYLE = {
+    "approved": "green",
+    "rejected": "red",
+    "needs_review": "yellow",
+}
+
+
+def _render_approval(state: InvoiceState) -> None:
+    result = state.get("approval_result")
+    if result is None:
+        return
+    decision = result.decision.value
+    style = _DECISION_STYLE.get(decision, "white")
+    console.print(f"[bold {style}]Approval: {decision.upper()}[/] (route={result.route})")
+    console.print(f"  reason: {result.reasoning}")
+    _render_reflection(result)
+
+
+def _render_reflection(result) -> None:
+    """Print the draft -> critique -> revised transcript when the loop actually ran."""
+    trace = result.trace
+    if not trace.ran:
+        return
+    console.print("  [dim]reflection transcript:[/]")
+    console.print(f"    draft   ({_decision_text(trace.draft_decision)}): {trace.draft_reasoning}")
+    console.print(f"    critique: {trace.critique}")
+    console.print(f"    revised ({_decision_text(trace.revised_decision)}): {trace.revised_reasoning}")
+
+
+def _decision_text(decision) -> str:
+    return decision.value if decision is not None else "-"
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Galatiq invoice ingestion (Phase 2).")
+    parser = argparse.ArgumentParser(description="Galatiq invoice processing pipeline.")
     parser.add_argument("--invoice_path", required=True, help="Path to the invoice file.")
     parser.add_argument("--verbose", action="store_true", help="Enable DEBUG-level logging.")
     args = parser.parse_args()

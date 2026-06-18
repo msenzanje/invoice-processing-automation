@@ -1,7 +1,7 @@
 from typing import TypedDict, Optional, Dict, Any, List
 
 from models.invoice_data import InvoiceData
-from models.results import ValidationResult
+from models.results import ApprovalResult, ValidationResult
 
 
 class InvoiceState(TypedDict):
@@ -36,7 +36,11 @@ class InvoiceState(TypedDict):
     invoice_data: Optional[InvoiceData]
     
     # Processing state
-    processing_stage: str  # "pending", "extracted", "validated", "stored"
+    # processing_stage values, in pipeline order:
+    #   "pending" -> "extracted" -> "validated" ->
+    #   one terminal approval stage: "approved" | "rejected" | "needs_review"
+    # (legacy "stored" is retained for back-compat but no longer set.)
+    processing_stage: str
     is_valid: Optional[bool]
     validation_errors: List[str]
 
@@ -44,6 +48,13 @@ class InvoiceState(TypedDict):
     # Typed flags produced by agents.validation.validate_invoice(). The approval
     # agent routes on these (specifically flag severity). None until validation runs.
     validation_result: Optional[ValidationResult]
+
+    # Structured approval result (Phase 4 — Approval Agent).
+    # Produced by agents.approval.approve_invoice(): the committed decision
+    # (approved / rejected / needs_review), its reasoning, and the full reflection
+    # transcript. The graph's conditional edge routes on approval_result.decision.
+    # None until approval runs (e.g. when ingestion failed and was skipped forward).
+    approval_result: Optional[ApprovalResult]
     
     # Database/Inventory state
     inventory_updated: bool 
