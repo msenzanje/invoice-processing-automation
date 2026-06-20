@@ -123,3 +123,86 @@ class ValidationResult(BaseModel):
             "item_validations": [iv.model_dump() for iv in self.item_validations],
             "invoice_flags": [flag.model_dump() for flag in self.invoice_flags],
         }
+
+
+# =============================================================================
+# Approval contract (Phase 4 — Approval Agent)
+# =============================================================================
+class ApprovalDecision(str, Enum):
+    """The three terminal outcomes of the approval agent.
+
+    This is the structural reason the pipeline can express a *third* state beyond
+    approve/reject: ``NEEDS_REVIEW`` lets the system escalate to a human when it is
+    genuinely uncertain (the draft and revised passes disagreed, the deterministic
+    gate flagged an unrecognised vendor, or the LLM was unreachable) rather than
+    forcing a coin-flip. The graph's conditional edge routes on exactly this enum:
+    ``APPROVED -> payment``, ``REJECTED -> log``, ``NEEDS_REVIEW -> escalation``.
+    """
+
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    NEEDS_REVIEW = "needs_review"
+
+
+class ReflectionTrace(BaseModel):
+    """The audit trail of one draft -> critique -> revise reflection cycle.
+
+    Captured verbatim so a human reviewer (or an auditor replacing the old VP email
+    chain) can see exactly how the model reasoned, including where the revised pass
+    diverged from the draft. Every field is optional because a fast-tracked or
+    gate-escalated invoice never enters the loop and so has no transcript.
+    """
+
+    draft_decision: Optional[ApprovalDecision] = None
+    draft_reasoning: Optional[str] = None
+    critique: Optional[str] = None
+    revised_decision: Optional[ApprovalDecision] = None
+    revised_reasoning: Optional[str] = None
+
+    @property
+    def ran(self) -> bool:
+        """True if the reflection loop actually executed (a draft was produced)."""
+        return self.draft_decision is not None
+
+
+class ApprovalResult(BaseModel):
+    """The complete approval outcome for one invoice — the approval agent's output.
+
+    ``decision`` is the committed routing verdict; ``reasoning`` is the
+    human-readable justification; ``trace`` carries the full reflection transcript
+    when the critique loop ran (empty otherwise). ``route`` records *which* gate
+    path produced the decision (fast-approve, auto-review, or the full loop), so the
+    audit log shows not just the verdict but why that verdict was reached cheaply or
+    expensively.
+    """
+
+    invoice_id: Optional[str] = None
+    decision: ApprovalDecision
+    reasoning: str
+    route: str
+    trace: ReflectionTrace = Field(default_factory=ReflectionTrace)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Fully JSON-serialisable view for the JSONL audit trail.
+
+        Mirrors :meth:`ValidationResult.to_dict` so every agent's audit record has
+        the same shape. ``json.dumps`` accepts this dict directly.
+        """
+        return {
+            "invoice_id": self.invoice_id,
+            "decision": self.decision.value,
+            "reasoning": self.reasoning,
+            "route": self.route,
+            "trace": {
+                "draft_decision": _decision_value(self.trace.draft_decision),
+                "draft_reasoning": self.trace.draft_reasoning,
+                "critique": self.trace.critique,
+                "revised_decision": _decision_value(self.trace.revised_decision),
+                "revised_reasoning": self.trace.revised_reasoning,
+            },
+        }
+
+
+def _decision_value(decision: Optional[ApprovalDecision]) -> Optional[str]:
+    """Render an optional decision enum as its string value (or None)."""
+    return decision.value if decision is not None else None

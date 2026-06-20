@@ -15,11 +15,29 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Optional, Protocol, Sequence
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def strip_json(text: str) -> str:
+    """Pull the outermost JSON object out of a possibly fenced/prose-wrapped reply.
+
+    LLMs frequently wrap a JSON answer in ```code fences``` or surrounding prose;
+    this trims both so the result can be handed to ``model_validate_json``. Lives
+    here, at the LLM I/O boundary, because every agent that parses a model reply
+    needs it (ingestion and approval both do).
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I).strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        return text[start:end + 1]
+    return text
 
 XAI_BASE_URL = os.environ.get("XAI_BASE_URL", "https://api.x.ai/v1")
 ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1")
