@@ -83,7 +83,11 @@ def route_after_approval(state: InvoiceState) -> str:
     if result is None:
         logger.info("routing %s: no approval_result -> log_rejection", state.get("invoice_id"))
         return "log_rejection"
-    return _DECISION_ROUTE[result.decision]
+    # .get with an escalate default: a future ApprovalDecision member not yet mapped
+    # here routes to human review rather than raising KeyError into the graph, keeping
+    # the router bound to a "never raises" contract and failing
+    # in the same safe direction approve_invoice already uses for LLM errors.
+    return _DECISION_ROUTE.get(result.decision, "escalate_review")
 
 
 def build_graph():
