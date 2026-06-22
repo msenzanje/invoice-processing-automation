@@ -206,3 +206,58 @@ class ApprovalResult(BaseModel):
 def _decision_value(decision: Optional[ApprovalDecision]) -> Optional[str]:
     """Render an optional decision enum as its string value (or None)."""
     return decision.value if decision is not None else None
+
+
+# Audit contract (Payment Agent and Audit Log)
+class AuditRecord(BaseModel):
+    """One terminal audit line — the record every invoice leaves on disk.
+
+    This is the artifact that replaces the VP email approval chain (PROJECT_CONTEXT
+    §5) and is described there as legally significant, so its shape is a fixed
+    contract an auditor depends on. Exactly one record is written per invoice, on
+    every terminal branch (paid / rejected / escalated / dead-on-arrival).
+
+    Three fields are nullable by *outcome*, not by accident:
+
+    * ``vendor`` is None when ingestion failed and no vendor was ever extracted —
+      identity still lives in ``invoice_id``, so a null vendor is honest, not lossy.
+    * ``critique`` is None unless the approval reflection loop actually ran (the
+      spec's "critique (if applicable)"); it carries the single most diagnostic
+      line of the model's deliberation when an invoice was contested.
+    * ``payment_status`` is set only on the approved/payment path; rejection and
+      escalation leave it null because nothing was paid.
+
+    ``timestamp`` is the processing *start* time, so ``timestamp`` plus
+    ``processing_time_ms`` reconstructs the full processing window from one record.
+    """
+
+    invoice_id: Optional[str] = None
+    timestamp: str
+    vendor: Optional[str] = None
+    amount: float
+    decision: str
+    reasoning: str
+    critique: Optional[str] = None
+    flags: list[str] = Field(default_factory=list)
+    payment_status: Optional[str] = None
+    processing_time_ms: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Fully JSON-serialisable view for the JSONL audit trail.
+
+        Mirrors :meth:`ValidationResult.to_dict` and :meth:`ApprovalResult.to_dict`
+        so every record in ``logs/audit.jsonl`` shares the house shape. ``json.dumps``
+        accepts this dict directly. Field order matches the PROJECT_CONTEXT §5 schema.
+        """
+        return {
+            "invoice_id": self.invoice_id,
+            "timestamp": self.timestamp,
+            "vendor": self.vendor,
+            "amount": self.amount,
+            "decision": self.decision,
+            "reasoning": self.reasoning,
+            "critique": self.critique,
+            "flags": list(self.flags),
+            "payment_status": self.payment_status,
+            "processing_time_ms": self.processing_time_ms,
+        }

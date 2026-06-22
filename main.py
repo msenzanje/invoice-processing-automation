@@ -23,6 +23,7 @@ from rich.table import Table
 
 from graph.workflow import build_graph
 from models.state import InvoiceState
+from tools.audit import AUDIT_PATH
 
 console = Console()
 
@@ -144,6 +145,9 @@ def main() -> None:
     app = build_graph()
     result = app.invoke(build_initial_state(args.invoice_path))
     _render_result(result)
+    # Printed unconditionally (not inside _render_result, which returns early on a
+    # dead invoice) so every run tells the operator where the durable record landed.
+    console.print(f"[dim]Audit record appended to {AUDIT_PATH}[/]")
 
 
 if __name__ == "__main__":
