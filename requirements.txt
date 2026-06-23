@@ -17,5 +17,9 @@ httpx>=0.27.0
 python-dotenv>=1.0.0
 rich>=13.0.0
 
+# Web dashboard (dashboard/ — FastAPI served, polled by a static frontend)
+fastapi>=0.110.0
+uvicorn>=0.27.0
+
 # Tests
 pytest>=8.0.0
