@@ -78,7 +78,7 @@ def _render_result(state: InvoiceState) -> None:
         console.print(
             Panel(
                 state["error_message"],
-                title="[bold red]☠ Ingestion failed[/]",
+                title="[bold red] Ingestion failed[/]",
                 title_align="left",
                 border_style="red",
                 expand=False,
@@ -90,7 +90,7 @@ def _render_result(state: InvoiceState) -> None:
         console.print(
             Panel(
                 "No invoice data was produced.",
-                title="[bold yellow]⚠ Empty result[/]",
+                title="[bold yellow] Empty result[/]",
                 title_align="left",
                 border_style="yellow",
                 expand=False,

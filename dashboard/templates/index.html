@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Invoice Processing Automation — Accounts payable, processed by agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="page">
+    <!-- HEADER -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-mark"><div class="brand-diamond"></div></div>
+        <div>
+          <div class="brand-title-row">
+            <span class="brand-title">Invoice Processing Automation</span>
+            <span class="brand-badge">AUTONOMOUS</span>
+          </div>
+          <div class="brand-sub">Accounts payable, processed by agent</div>
+        </div>
+      </div>
+      <div class="header-controls">
+        <div class="pill pill-live">
+          <span class="live-dot"><span class="live-dot-core"></span><span class="live-dot-ring"></span></span>
+          <span class="pill-strong">Live</span>
+        </div>
+        <div class="pill pill-button">Last 30 days <span class="caret-faint">▾</span></div>
+        <button id="theme-toggle" class="pill pill-button" type="button">
+          <span id="theme-icon">☾</span> <span id="theme-label">Dark</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- KPI BAND -->
+    <div class="section-label">EXECUTIVE SUMMARY</div>
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-title">Invoices processed</div>
+        <div class="kpi-value" id="kpi-processed">—</div>
+        <div class="kpi-foot"><span class="up" id="kpi-processed-delta"></span> total records</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Auto-approval rate</div>
+        <div class="kpi-value accent" id="kpi-rate">—</div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-rate-bar"></div></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Avg processing time</div>
+        <div class="kpi-value" id="kpi-avg">—</div>
+        <div class="kpi-foot"><span class="muted-foot">per invoice</span></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Value approved</div>
+        <div class="kpi-value" id="kpi-value">—</div>
+        <div class="kpi-foot"><span class="muted-foot">paid &amp; scheduled</span></div>
+      </div>
+    </section>
+
+    <!-- MAIN GRID -->
+    <div class="main-grid">
+
+      <!-- TABLE -->
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-head-row">
+            <div class="panel-title-group">
+              <h2 class="panel-title">Processed invoices</h2>
+              <span class="panel-count"><span id="shown-count">0</span> shown</span>
+            </div>
+            <div class="search">
+              <span class="search-icon">⌕</span>
+              <input id="search" type="text" placeholder="Search vendor or ID" autocomplete="off">
+            </div>
+          </div>
+          <div class="chips" id="chips"></div>
+        </div>
+
+        <div class="col-head">
+          <div>INVOICE</div><div>VENDOR</div><div class="ralign">AMOUNT</div><div>DECISION</div><div>PAYMENT</div><div></div>
+        </div>
+
+        <div id="rows" class="rows"></div>
+        <div id="rows-empty" class="empty-state" hidden>No invoices match this view.</div>
+      </section>
+
+      <!-- LIVE FEED -->
+      <section class="panel feed-panel">
+        <div class="panel-head feed-head">
+          <div class="feed-head-left">
+            <span class="proc-dot"></span>
+            <h2 class="feed-title">Live processing</h2>
+          </div>
+          <span class="realtime-label">REALTIME</span>
+        </div>
+        <div id="feed" class="feed"></div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Row template: cloned per invoice by app.js -->
+  <template id="row-template">
+    <div class="row-wrap">
+      <div class="row" data-toggle>
+        <div class="cell-id">
+          <span class="mono fw5" data-id></span>
+          <div class="cell-time" data-time></div>
+        </div>
+        <div class="cell-vendor" data-vendor></div>
+        <div class="cell-amount mono" data-amount></div>
+        <div class="cell-decision">
+          <span class="badge" data-badge><span class="badge-dot"></span><span data-badge-text></span></span>
+        </div>
+        <div class="cell-payment" data-payment></div>
+        <div class="cell-caret" data-caret>▾</div>
+      </div>
+      <div class="detail" data-detail>
+        <div class="detail-inner">
+          <div class="chain">
+            <div class="chain-step"><span class="chain-dot done"></span><span class="chain-text">Extracted</span></div>
+            <div class="chain-line"></div>
+            <div class="chain-step"><span class="chain-dot done"></span><span class="chain-text">Validated</span></div>
+            <div class="chain-line"></div>
+            <div class="chain-step"><span class="chain-dot" data-chain-dot></span><span class="chain-text strong" data-chain-text></span></div>
+          </div>
+          <div class="detail-grid">
+            <div>
+              <div class="detail-label">AGENT REASONING</div>
+              <div class="detail-reasoning" data-reasoning></div>
+              <div class="detail-label">SELF-CRITIQUE</div>
+              <div class="detail-critique" data-critique></div>
+            </div>
+            <div class="detail-meta">
+              <div class="meta-row"><span class="meta-key">Invoice ID</span><span class="mono" data-meta-id></span></div>
+              <div class="meta-row bt"><span class="meta-key">Amount</span><span class="mono" data-meta-amount></span></div>
+              <div class="meta-row bt"><span class="meta-key">Payment</span><span data-meta-payment></span></div>
+              <div class="meta-row bt"><span class="meta-key">Processing</span><span class="mono" data-meta-proc></span></div>
+              <div class="meta-flags bt">
+                <div class="meta-flags-title">Flags</div>
+                <div class="flag-list" data-flags></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Feed item template -->
+  <template id="feed-template">
+    <div class="feed-card">
+      <div class="feed-card-row">
+        <div class="feed-icon" data-icon><span class="feed-dot" data-feed-dot></span></div>
+        <div class="feed-main">
+          <div class="feed-vendor" data-vendor></div>
+          <div class="feed-id mono" data-id></div>
+        </div>
+        <div class="feed-right">
+          <div class="feed-amount mono" data-amount></div>
+          <div class="feed-label" data-label></div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script id="bootstrap-data" type="application/json">__BOOTSTRAP_DATA__</script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
