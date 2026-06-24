@@ -1,0 +1,14 @@
+# Secrets & local environment
+.env
+.venv
+
+# Project context doc — kept local for now
+PROJECT_CONTEXT.md
+
+# Runtime audit trail — created at write time by tools/audit.py (mkdir on first run).
+logs/
+
+# Python bytecode & caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
