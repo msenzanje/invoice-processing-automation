@@ -51,6 +51,7 @@ class InvoiceData(BaseModel):
     amount: float
     items: list[LineItem] = Field(default_factory=list)
     due_date: date
+    invoice_date: Optional[date] = None
     invoice_id: Optional[str] = None
     field_confidence: dict[str, Confidence] = Field(default_factory=dict)
 
@@ -80,6 +81,7 @@ class InvoiceData(BaseModel):
             "invoice_id": self.invoice_id,
             "vendor": self.vendor,
             "amount": self.amount,
+            "invoice_date": self.invoice_date.isoformat() if self.invoice_date else None,
             "due_date": self.due_date.isoformat(),
             "items": [item.model_dump() for item in self.items],
             "field_confidence": {

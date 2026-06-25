@@ -129,6 +129,7 @@ def _summarize_invoice(data: InvoiceData, validation: ValidationResult) -> str:
         f"Invoice ID: {data.invoice_id or '(none)'}",
         f"Vendor: {data.vendor or '(blank)'}",
         f"Amount: ${data.amount:,.2f}",
+        f"Invoice date: {data.invoice_date.isoformat() if data.invoice_date else '(not extracted)'}",
         f"Due date: {data.due_date.isoformat()}",
         f"Overall extraction confidence: {data.overall_confidence.value}",
         "",
@@ -183,9 +184,22 @@ _CRITIQUE_INSTRUCTIONS = """You are a skeptical VP of Finance reviewing an analy
 on an invoice. Your job is to find what the analyst got wrong or under-weighted.
 
 Identify unaddressed risks, edge cases, or validation flags the analyst may have
-discounted. Be adversarial — assume the invoice could be fraudulent or erroneous
-until proven otherwise. Do NOT make a decision yourself; only surface the risks the
-analyst should reconsider. Respond in 2-5 sentences of plain prose.
+discounted — but ONLY ones evidenced by the invoice context shown below. The context
+above is the COMPLETE set of evidence available: the extracted fields, per-field and
+overall extraction confidence, the line items, and the validation flags. You have no
+other systems to consult.
+
+Therefore do NOT fault the analyst for the absence of data this review does not have
+and was never expected to have: purchase orders, goods receipts, contract references,
+a vendor master file (bank details, remit-to address), duplicate-invoice history, or
+historical price/quantity benchmarks. Those checks are out of scope; their absence is
+not a risk signal. Do not infer anything from today's date — judge the due date only
+against the invoice's own dates. If, within the available evidence, the invoice shows
+no genuine risk, say so plainly rather than inventing one.
+
+Be adversarial about what the evidence actually supports. Do NOT make a decision
+yourself; only surface the risks the analyst should reconsider. Respond in 2-5
+sentences of plain prose.
 
 The invoice:
 ---
@@ -288,9 +302,7 @@ def _run_reflection(
     )
 
 
-# =============================================================================
-# Step 5 — agreement / disagreement resolution
-# =============================================================================
+# Agreement / disagreement resolution
 def _resolve(
     route: Route,
     data: InvoiceData,
