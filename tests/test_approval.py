@@ -137,21 +137,25 @@ def test_gate_does_not_fast_approve_at_the_low_threshold():
     assert route is Route.FULL_LOOP
 
 
-def test_gate_unrecognized_vendor_auto_reviews():
+def test_gate_unrecognized_vendor_runs_the_loop():
+    # An unknown vendor is only a warning: it no longer auto-escalates. It carries a
+    # flag (so it can't fast-track) and falls through to the loop, where the LLM
+    # judges the invoice's legitimacy.
     result = _with_flags(ValidationFlag.of(FlagCode.VENDOR_UNRECOGNIZED, "unknown vendor"))
-    route = _classify(_invoice(amount=500.0, vendor="Fraudster LLC"), result)
-    assert route is Route.AUTO_REVIEW
+    route = _classify(_invoice(amount=500.0, vendor="New Vendor LLC"), result)
+    assert route is Route.FULL_LOOP
 
 
-def test_gate_vendor_rule_beats_error_and_threshold():
-    # A vendor flag escalates even when an error flag and a huge amount are present.
+def test_gate_unrecognized_vendor_does_not_short_circuit_error_or_threshold():
+    # With the vendor escalation gone, an unknown vendor alongside an error flag and a
+    # huge amount still simply routes to the loop — nothing overrides it.
     result = ValidationResult(
         invoice_id="INV-TEST",
         item_validations=_error_result().item_validations,
         invoice_flags=[ValidationFlag.of(FlagCode.VENDOR_UNRECOGNIZED, "unknown")],
     )
-    route = _classify(_invoice(amount=99999.0, vendor="Fraudster LLC"), result)
-    assert route is Route.AUTO_REVIEW
+    route = _classify(_invoice(amount=99999.0, vendor="New Vendor LLC"), result)
+    assert route is Route.FULL_LOOP
 
 
 def test_gate_error_flag_forces_full_loop():
@@ -251,12 +255,6 @@ def test_resolver_fast_approve_short_circuits_without_trace():
     result = _resolve(Route.FAST_APPROVE, _invoice(amount=500.0), _clean(), ReflectionTrace())
     assert result.decision is ApprovalDecision.APPROVED
     assert result.trace.ran is False
-
-
-def test_resolver_auto_review_short_circuits_to_needs_review():
-    result = _resolve(Route.AUTO_REVIEW, _invoice(vendor="X"), _clean(), ReflectionTrace())
-    assert result.decision is ApprovalDecision.NEEDS_REVIEW
-    assert "VENDOR_UNRECOGNIZED" in result.reasoning
 
 
 # ---------------------------------------------------------------------------

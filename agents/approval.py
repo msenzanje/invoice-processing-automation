@@ -3,11 +3,12 @@ Approval Agent — turns a validated invoice into a committed, defensible decisi
 
 This is the most agentic part of the pipeline. Its design has two layers:
 
-* A **deterministic gate** (:func:`_classify`) applies the hard policy rules 
-  *before* a token is spent: an unrecognised vendor
-  always escalates; any error-severity flag or an amount over $10K always earns the
-  full critique loop; a clean sub-$1K high-confidence invoice fast-tracks. Policy is
-  code, not LLM judgment — a hallucinating model can never override these.
+* A **deterministic gate** (:func:`_classify`) applies the hard policy rules
+  *before* a token is spent: any error-severity flag or an amount over $10K always
+  earns the full critique loop; a clean sub-$1K high-confidence invoice fast-tracks.
+  An unrecognised vendor is only a warning, so it earns the loop rather than an
+  automatic escalation — the LLM judges the invoice's legitimacy. Policy is code,
+  not LLM judgment — a hallucinating model can never override these.
 
 * A **reflection loop** (:func:`_run_reflection`) runs only for the genuinely
   ambiguous invoices the gate routes to ``FULL_LOOP``. The LLM drafts a decision,
@@ -57,7 +58,7 @@ APPROVAL_THRESHOLD_LOW = float(os.environ.get("APPROVAL_THRESHOLD_LOW", "1000"))
 class Route(str, Enum):
     """The deterministic gate's verdict — *which* path resolves the invoice.
 
-    Only ``FULL_LOOP`` invokes the LLM. The other two are resolved by policy alone
+    Only ``FULL_LOOP`` invokes the LLM. ``FAST_APPROVE`` is resolved by policy alone
     (and recorded on the :class:`~models.results.ApprovalResult` for the audit log).
     Note there is no ``AUTO_REJECT``: no flag in the taxonomy means "fraud", so
     rejection is never a deterministic verdict — it can only emerge from the loop
@@ -65,7 +66,6 @@ class Route(str, Enum):
     """
 
     FAST_APPROVE = "fast_approve"  # clean, small, high-confidence -> approve, no LLM
-    AUTO_REVIEW = "auto_review"  # unrecognised vendor -> escalate, no LLM
     FULL_LOOP = "full_loop"  # ambiguous -> run the draft->critique->revise loop
 
 
@@ -74,27 +74,22 @@ def _classify(data: InvoiceData, validation: ValidationResult) -> Route:
     """Apply the hard routing rules (PROJECT_CONTEXT §5) in priority order.
 
     Pure and I/O-free, so every branch is unit-testable with constructed fixtures.
-    Priority matters: the vendor-escalation rule is checked before the
-    error/threshold rules so an unrecognised vendor always lands in human review,
-    even on an otherwise loop-worthy invoice.
+    An unrecognised vendor is *not* a deterministic escalation: it carries only a
+    warning flag, so such an invoice falls through to the full critique loop where
+    the LLM judges its legitimacy on the rest of the evidence — a legitimate one can
+    be approved, a suspect one still escalates or is rejected.
     """
-    from models.results import FlagCode
-
     flags = validation.all_flags()
 
-    # Rule 1 — any VENDOR_UNRECOGNIZED flag -> always needs_review (escalate).
-    if any(flag.code is FlagCode.VENDOR_UNRECOGNIZED for flag in flags):
-        return Route.AUTO_REVIEW
-
-    # Rule 2 — any error-severity flag -> full critique loop, regardless of amount.
+    # Rule 1 — any error-severity flag -> full critique loop, regardless of amount.
     if validation.has_errors:
         return Route.FULL_LOOP
 
-    # Rule 3 — amount over the high threshold -> always the full critique loop.
+    # Rule 2 — amount over the high threshold -> always the full critique loop.
     if data.amount > APPROVAL_THRESHOLD_HIGH:
         return Route.FULL_LOOP
 
-    # Rule 4 — clean, small, high-confidence -> fast-track approval (no LLM).
+    # Rule 3 — clean, small, high-confidence -> fast-track approval (no LLM).
     if (
         not flags
         and data.amount < APPROVAL_THRESHOLD_LOW
@@ -165,8 +160,13 @@ Decide whether to APPROVE it for payment, REJECT it, or send it for human REVIEW
 
 Weigh the validation flags (error-severity flags are serious), the extraction
 confidence, the vendor, and whether the amounts and quantities are plausible. Be
-alert to fraud signals: unrecognised vendors, urgent payment pressure, impossible
-quantities, or items that do not exist in inventory.
+alert to fraud signals: urgent payment pressure, impossible quantities, or items
+that do not exist in inventory.
+
+A vendor that is simply not yet on the approved-vendor list (VENDOR_UNRECOGNIZED) is
+a routine onboarding gap, not a fraud signal on its own. Approve a legitimate invoice
+from an unknown vendor when the rest of the evidence is sound; escalate or reject only
+if something else about the invoice is genuinely wrong.
 
 Return ONLY a single JSON object — no markdown, no commentary:
 {
@@ -311,7 +311,7 @@ def _resolve(
 ) -> ApprovalResult:
     """Map (route, reflection trace) -> a committed :class:`ApprovalResult`.
 
-    The gate's deterministic verdicts short-circuit without ever consulting the
+    A ``FAST_APPROVE`` verdict short-circuits without ever consulting the
     trace. For ``FULL_LOOP`` runs the rule is: draft and revised agree -> commit that
     decision; they disagree -> escalate to ``NEEDS_REVIEW`` with both passes plus the
     critique surfaced so a human sees exactly why the model split with itself.
@@ -325,17 +325,6 @@ def _resolve(
             reasoning=(
                 f"Fast-tracked: clean validation, amount ${data.amount:,.2f} is below "
                 f"${APPROVAL_THRESHOLD_LOW:,.0f}, and extraction confidence is high."
-            ),
-            route=route.value,
-        )
-
-    if route is Route.AUTO_REVIEW:
-        return ApprovalResult(
-            invoice_id=invoice_id,
-            decision=ApprovalDecision.NEEDS_REVIEW,
-            reasoning=(
-                "Escalated by policy: the vendor is not on the approved-vendor list "
-                "(VENDOR_UNRECOGNIZED), which always requires human review."
             ),
             route=route.value,
         )
@@ -382,8 +371,8 @@ def run_approval(
     keeping this core honest about whether the loop actually completed. A pass that
     cannot be parsed after retries surfaces as a ``ValueError`` for the node to map.
 
-    The LLM is touched only when the gate routes to ``FULL_LOOP``; a fast-approve or
-    auto-review never calls ``llm.complete``, so a stub client is harmless there.
+    The LLM is touched only when the gate routes to ``FULL_LOOP``; a fast-approve
+    never calls ``llm.complete``, so a stub client is harmless there.
     """
     route = _classify(data, validation)
     logger.info("approval[%s]: gate route=%s", data.invoice_id, route.value)
