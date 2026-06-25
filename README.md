@@ -39,7 +39,7 @@ A few principles run through the whole codebase and are worth internalizing befo
 
 **Fail-forward, never crash.** Every node in the pipeline takes state in and returns state out — it *never raises into the graph*. A failed extraction, an unreachable LLM, or a disk write error routes the invoice to a safe terminal state (usually human review) rather than sinking the run. One bad invoice never takes down a batch.
 
-**Policy is code, not LLM judgment.** Hard rules (unrecognized vendor -> escalate; amount over $10K -> full review) are enforced deterministically *before* a token is ever spent. A hallucinating model can't override them.
+**Policy is code, not LLM judgment.** Hard rules (any error-severity flag or an amount over $10K -> full review) are enforced deterministically *before* a token is ever spent. A hallucinating model can't override them.
 
 **Admit uncertainty.** The approval agent can return a third outcome beyond approve/reject: `needs_review`. When the system is genuinely unsure, it escalates to a human instead of forcing a coin-flip.
 
@@ -126,11 +126,12 @@ The most agentic part of the pipeline, with two layers:
 
 **A deterministic gate** applies hard policy rules *before* spending a token, in priority order:
 
-1. An unrecognized vendor → **always escalate** to human review.
-2. Any error-severity flag → **full critique loop**.
-3. Amount over `$10,000` → **full critique loop**.
-4. Clean, under `$1,000`, high-confidence → **fast-track approve** (no LLM).
-5. Everything else (warning-only, mid-range amounts) → **full critique loop**.
+1. Any error-severity flag → **full critique loop**.
+2. Amount over `$10,000` → **full critique loop**.
+3. Clean, under `$1,000`, high-confidence → **fast-track approve** (no LLM).
+4. Everything else (warning-only, mid-range amounts) → **full critique loop**.
+
+An unrecognized vendor is only a warning, so it carries a flag (never fast-tracks) and falls through to the critique loop, where the LLM judges the invoice's legitimacy — a legitimate invoice from an unknown vendor can be approved; a suspect one still escalates or is rejected.
 
 **A reflection loop** runs only for the genuinely ambiguous invoices the gate routes to `FULL_LOOP`:
 
@@ -150,6 +151,8 @@ flowchart LR
 ```
 
 If the draft and the revision agree, that decision is committed. If they disagree, the invoice escalates to a human. If the LLM is unreachable, the result escalates to `needs_review`, never a crash, and never a silent auto-approve. The full draft -> critique -> revise transcript is captured for the audit log.
+
+> **Reconciliation gaps escalate to human review.** Validation checks items against inventory but does not assert that the line items add up to the stated total. When a gap exists — because tax, shipping, surcharges, or discounts are on the invoice but not reflected in the extracted line items — the critique loop sees an unexplained difference between the parts and the whole and routes the invoice to `needs_review` rather than approving it. Such an invoice can pass validation with zero flags and still land in the review queue; an unreconciled total is treated as ambiguity for a human to resolve, not something to pay silently.
 
 ### 4 · Payment / Terminal Nodes (`agents/payment.py`)
 
