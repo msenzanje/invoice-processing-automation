@@ -66,6 +66,12 @@ _AMOUNT_FALLBACK_RE = re.compile(r"\$\s*([\d,]+\.\d{2})")
 _DUE_DATE_RE = re.compile(
     r"\bdue\s*(?:date)?\s*:?\s*([A-Za-z0-9][A-Za-z0-9,/\- ]*?)(?:\s{2,}|\s*$)", re.I | re.M
 )
+# Invoice issue date: a "Date"/"Invoice Date" label NOT preceded by "Due". The
+# negative lookbehind keeps "Due Date:" from matching here (it owns _DUE_DATE_RE).
+_INVOICE_DATE_RE = re.compile(
+    r"^[ \t]*(?:invoice\s+)?date\s*:?\s*([A-Za-z0-9][A-Za-z0-9,/\- ]*?)(?:\s{2,}|\s*$)",
+    re.I | re.M,
+)
 _INVOICE_ID_RE = re.compile(
     r"\binv(?:oice)?\.?\s*(?:number|num|no\.?|#|id)?\s*[:#-]?\s*((?:INV[- ]?)?\d[\w-]*)", re.I
 )
@@ -79,6 +85,7 @@ _LINE_ITEM_RE = re.compile(
 _VENDOR_KEYS = ("vendor", "supplier", "seller", "vendor_name", "from")
 _AMOUNT_KEYS = ("total", "total_amount", "amount", "amount_due", "grand_total")
 _DUE_KEYS = ("due_date", "due", "payment_due", "duedate")
+_INVOICE_DATE_KEYS = ("invoice_date", "date", "issue_date", "issued", "invoicedate")
 _ITEMS_KEYS = ("line_items", "items", "lineitems")
 _ID_KEYS = ("invoice_number", "invoice_id", "invoice_no", "number")
 
@@ -142,6 +149,11 @@ def _parse_text_fields(raw: str) -> Fields:
         parsed = _parse_date(due.group(1).strip())
         if parsed is not None:
             fields["due_date"] = ExtractedField(parsed, Confidence.HIGH)
+    issued = _INVOICE_DATE_RE.search(raw)
+    if issued:
+        parsed = _parse_date(issued.group(1).strip())
+        if parsed is not None:
+            fields["invoice_date"] = ExtractedField(parsed, Confidence.HIGH)
     inv = _INVOICE_ID_RE.search(raw)
     if inv:
         fields["invoice_id"] = ExtractedField(inv.group(1).strip(), Confidence.HIGH)
@@ -254,7 +266,8 @@ def _parse_vertical_csv(frame: Any) -> Fields:
     if pending:
         items.append(pending)
     return _csv_fields(pairs.get("vendor"), pairs.get("total") or pairs.get("amount"),
-                       pairs.get("due_date"), pairs.get("invoice_number"), items)
+                       pairs.get("due_date"), pairs.get("date") or pairs.get("invoice_date"),
+                       pairs.get("invoice_number"), items)
 
 
 def _parse_columnar_csv(frame: Any) -> Fields:
@@ -274,9 +287,10 @@ def _parse_columnar_csv(frame: Any) -> Fields:
         })
     vendor = _first_nonempty(frame, colmap.get("vendor"))
     due = _first_nonempty(frame, colmap.get("due_date"))
+    issued = _first_nonempty(frame, colmap.get("invoice_date"))
     invoice_id = _first_nonempty(frame, colmap.get("invoice_id"))
     total = _columnar_total(frame, colmap.get("line_total") or frame.columns[-1])
-    return _csv_fields(vendor, total, due, invoice_id, items)
+    return _csv_fields(vendor, total, due, issued, invoice_id, items)
 
 
 def _csv_colmap(columns: Any) -> dict[str, str]:
@@ -288,6 +302,7 @@ def _csv_colmap(columns: Any) -> dict[str, str]:
         "line_total": ("line total", "line_total", "amount"),
         "vendor": ("vendor", "supplier", "seller"),
         "due_date": ("due date", "due_date", "due"),
+        "invoice_date": ("invoice date", "invoice_date", "date", "issue date"),
         "invoice_id": ("invoice number", "invoice_number", "invoice", "inv #", "invoice #"),
     }
     lowered = {str(c).strip().lower(): str(c) for c in columns}
@@ -325,6 +340,7 @@ def _csv_fields(
     vendor: Optional[str],
     total: Optional[str],
     due: Optional[str],
+    issued: Optional[str],
     invoice_id: Optional[str],
     items: list[dict[str, str]],
 ) -> Fields:
@@ -337,6 +353,9 @@ def _csv_fields(
     parsed_due = _parse_date(due) if due else None
     if parsed_due is not None:
         fields["due_date"] = ExtractedField(parsed_due, Confidence.HIGH)
+    parsed_issued = _parse_date(issued) if issued else None
+    if parsed_issued is not None:
+        fields["invoice_date"] = ExtractedField(parsed_issued, Confidence.HIGH)
     if invoice_id and invoice_id.strip():
         fields["invoice_id"] = ExtractedField(invoice_id.strip(), Confidence.HIGH)
     line_items = _build_line_items(items)
@@ -383,6 +402,9 @@ def _parse_json_fields(data: dict[str, Any]) -> Fields:
     due = _parse_date(_lookup(data, _DUE_KEYS))
     if due is not None:
         fields["due_date"] = ExtractedField(due, Confidence.HIGH)
+    issued = _parse_date(_lookup(data, _INVOICE_DATE_KEYS))
+    if issued is not None:
+        fields["invoice_date"] = ExtractedField(issued, Confidence.HIGH)
     invoice_id = _lookup(data, _ID_KEYS)
     if invoice_id:
         fields["invoice_id"] = ExtractedField(str(invoice_id), Confidence.HIGH)
@@ -453,6 +475,7 @@ def _build_invoice_data(fields: Fields) -> InvoiceData:
         amount=fields["amount"].value,
         items=items,
         due_date=fields["due_date"].value,
+        invoice_date=fields["invoice_date"].value if "invoice_date" in fields else None,
         invoice_id=fields["invoice_id"].value if "invoice_id" in fields else None,
         field_confidence=confidence,
     )
@@ -469,12 +492,15 @@ from the invoice text and return ONLY a single JSON object — no markdown, no c
   "amount": <final total due as a plain number, no currency symbol or commas>,
   "items": [{"item": "<name>", "quantity": <integer>, "unit_price": <number>}],
   "due_date": "<YYYY-MM-DD>",
+  "invoice_date": "<the invoice's own issue date in YYYY-MM-DD, or null>",
   "invoice_id": "<invoice number, or null>"
 }
 
 Rules:
 - amount is the final total due (including tax) as a plain number.
 - due_date MUST be ISO format YYYY-MM-DD; infer it if written in words.
+- invoice_date is the date the invoice was issued (its "Date" field), NOT the due
+  date; use ISO format YYYY-MM-DD, or null if the invoice shows no issue date.
 - Make a best inference where data is ambiguous, but do not invent line items.
 
 Invoice text:
@@ -526,11 +552,13 @@ def _merge(fields: Fields, llm_data: InvoiceData) -> InvoiceData:
             merged[name] = getattr(llm_data, name)
             confidence[name] = Confidence.MEDIUM
     invoice_id = fields["invoice_id"].value if "invoice_id" in fields else llm_data.invoice_id
+    invoice_date = fields["invoice_date"].value if "invoice_date" in fields else llm_data.invoice_date
     return InvoiceData(
         vendor=merged["vendor"],
         amount=merged["amount"],
         items=merged["items"],
         due_date=merged["due_date"],
+        invoice_date=invoice_date,
         invoice_id=invoice_id,
         field_confidence=confidence,
     )

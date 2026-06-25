@@ -39,22 +39,25 @@ VALID_LLM_JSON = (
 # (a) Clean extraction for each of the four formats — Pass 1 only, no LLM.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "filename, vendor, amount, due, n_items",
+    "filename, vendor, amount, due, issued, n_items",
     [
-        ("invoice_1001.txt", "Widgets Inc.", 5000.0, date(2026, 2, 1), 2),
-        ("invoice_1004.json", "Precision Parts Ltd.", 1890.0, date(2026, 2, 22), 2),
-        ("invoice_1006.csv", "Acme Industrial Supplies", 2750.0, date(2026, 2, 10), 2),
-        ("invoice_1007.csv", "MegaWidgets Corp", 15525.0, date(2026, 2, 28), 3),
-        ("invoice_1011.pdf", "Summit Manufacturing Co.", 3000.0, date(2026, 2, 20), 2),
+        ("invoice_1001.txt", "Widgets Inc.", 5000.0, date(2026, 2, 1), date(2026, 1, 15), 2),
+        ("invoice_1004.json", "Precision Parts Ltd.", 1890.0, date(2026, 2, 22), date(2026, 1, 22), 2),
+        ("invoice_1006.csv", "Acme Industrial Supplies", 2750.0, date(2026, 2, 10), date(2026, 1, 25), 2),
+        ("invoice_1007.csv", "MegaWidgets Corp", 15525.0, date(2026, 2, 28), date(2026, 1, 28), 3),
+        ("invoice_1011.pdf", "Summit Manufacturing Co.", 3000.0, date(2026, 2, 20), date(2026, 1, 20), 2),
     ],
 )
-def test_clean_extraction_per_format(filename, vendor, amount, due, n_items):
+def test_clean_extraction_per_format(filename, vendor, amount, due, issued, n_items):
     mock = MockLLMClient()
     data = extract(INVOICES / filename, llm_client=mock)
 
     assert data.vendor == vendor
     assert data.amount == amount
     assert data.due_date == due
+    # The invoice's own issue date is captured (and kept distinct from due_date),
+    # so the approval critique can reason about the document's timeline.
+    assert data.invoice_date == issued
     assert len(data.items) == n_items
     assert data.overall_confidence is Confidence.HIGH
     # A clean invoice must never pay the LLM tax.
@@ -142,6 +145,7 @@ def _make(**confidences) -> InvoiceData:
         amount=1.0,
         items=[LineItem(item="A", quantity=1, unit_price=1.0)],
         due_date=date(2026, 1, 1),
+        invoice_date=date(2025, 12, 15),
         invoice_id="INV-1",
         field_confidence=confidences,
     )
@@ -166,6 +170,7 @@ def test_model_dump_log_is_json_serialisable():
     log = _make(**{f: Confidence.HIGH for f in ("vendor", "amount", "items", "due_date")}).model_dump_log()
     json.dumps(log)  # must not raise
     assert log["due_date"] == "2026-01-01"
+    assert log["invoice_date"] == "2025-12-15"
     assert log["overall_confidence"] == "high"
     assert log["field_confidence"]["vendor"] == "high"
 
